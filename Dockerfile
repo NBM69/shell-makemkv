@@ -86,6 +86,37 @@ RUN echo "Z2RyaXZlIHVwbG9hZCAiJDEiIHwgZ3JlcCAtb1AgJyg/PD1VcGxvYWRlZC4pW2EtekEtWl
 # Copies config(if it exists)
 COPY . .
 
+#Makemkv
+FROM ubuntu:trusty
+
+ENV LANG en_US.UTF-8
+ENV VERSION 1.10.2
+
+#RUN locale-gen $LANG
+
+RUN apt-get update -q
+RUN apt-get install -yqq build-essential pkg-config libc6-dev libssl-dev libexpat1-dev libavcodec-dev libgl1-mesa-dev libqt4-dev
+
+ADD http://www.makemkv.com/download/makemkv-oss-$VERSION.tar.gz /tmp/makemkv-oss-$VERSION.tar.gz
+RUN tar xzf /tmp/makemkv-oss-$VERSION.tar.gz && \
+    rm /tmp/makemkv-oss-$VERSION.tar.gz && \
+    cd /makemkv-oss-$VERSION && \
+    ./configure && \
+    make && \
+    make install && \
+    rm -rf /makemkv-oss-$VERSION
+
+ADD http://www.makemkv.com/download/makemkv-bin-$VERSION.tar.gz /tmp/makemkv-bin-$VERSION.tar.gz
+RUN tar xzf /tmp/makemkv-bin-$VERSION.tar.gz && \
+    rm /tmp/makemkv-bin-$VERSION.tar.gz && \
+    cd /makemkv-bin-$VERSION && \
+    yes yes | make && \
+    make install && \
+    rm -rf /makemkv-bin-$VERSION
+
+RUN mkdir /data
+VOLUME ["/data"]
+
 # Install requirements and start the bot
 #install requirements
 COPY requirements.txt .
@@ -99,4 +130,4 @@ CMD node server
 #COPY nginx.conf /etc/nginx/nginx.conf
 #RUN dpkg --add-architecture i386 && apt-get update && apt-get -y dist-upgrade
 
-#CMD /bin/bash -c "envsubst '\$PORT' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf" && nginx -g 'daemon on;' &&  qbittorrent-nox -d --webui-port=8080 && cd /usr/src/app && mkdir Downloads && bash start.sh
+CMD /bin/bash -c "envsubst '\$PORT' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf" && nginx -g 'daemon on;' &&  qbittorrent-nox -d --webui-port=8080 && cd /usr/src/app && mkdir Downloads && bash start.sh
