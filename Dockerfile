@@ -1,99 +1,80 @@
-#
-# makemkv Dockerfile
-#
-# https://github.com/jlesage/docker-makemkv
-#
+FROM python:3-slim-buster
 
-# Define software versions.
-ARG MAKEMKV_VERSION=1.16.5
+# Install all the required packages
+WORKDIR /usr/src/app
+RUN chmod 777 /usr/src/app
+RUN apt-get -qq update
+RUN apt-get -qq install -y --no-install-recommends curl git gnupg2 unzip wget pv jq
 
-# Define software download URLs.
-ARG MAKEMKV_OSS_URL=https://www.makemkv.com/download/makemkv-oss-${MAKEMKV_VERSION}.tar.gz
-ARG MAKEMKV_BIN_URL=https://www.makemkv.com/download/makemkv-bin-${MAKEMKV_VERSION}.tar.gz
+# add mkvtoolnix
+RUN wget -q -O - https://mkvtoolnix.download/gpg-pub-moritzbunkus.txt | apt-key add - && \
+    wget -qO - https://ftp-master.debian.org/keys/archive-key-10.asc | apt-key add -
+RUN sh -c 'echo "deb https://mkvtoolnix.download/debian/ buster main" >> /etc/apt/sources.list.d/bunkus.org.list' && \
+    sh -c 'echo deb http://deb.debian.org/debian buster main contrib non-free | tee -a /etc/apt/sources.list' && apt update && apt install -y mkvtoolnix
 
-# Build MakeMKV.
-FROM ubuntu:20.04 AS makemkv
-ARG MAKEMKV_OSS_URL
-ARG MAKEMKV_BIN_URL
-COPY src/makemkv /tmp/makemkv
-RUN /tmp/makemkv/build.sh "${MAKEMKV_OSS_URL}" "${MAKEMKV_BIN_URL}"
+# install required packages
+RUN apt-get update && apt-get install -y software-properties-common && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-add-repository non-free && \
+    apt-get -qq update && apt-get -qq install -y --no-install-recommends \
+    # this package is required to fetch "contents" via "TLS"
+    apt-transport-https \
+    # install coreutils
+    coreutils aria2 jq pv gcc g++ \
+    # install encoding tools
+    mediainfo \
+    # miscellaneous
+    neofetch python3-dev git bash build-essential nodejs npm ruby \
+    python-minimal locales python-lxml qbittorrent-nox nginx gettext-base xz-utils \
+    # install extraction tools
+    p7zip-full p7zip-rar rar unrar zip unzip \
+    # miscellaneous helpers
+    megatools mediainfo && \
+    # clean up the container "layer", after we are done
+    rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
-# Build YAD.
-# NOTE: We build a static version to reduce the number of dependencies to be
-#       added to the image.
-FROM alpine:3.14 AS yad
-COPY src/yad/build.sh /build-yad.sh
-RUN /build-yad.sh
+RUN wget https://johnvansickle.com/ffmpeg/builds/ffmpeg-git-amd64-static.tar.xz && \
+    tar xvf ffmpeg*.xz && \
+    cd ffmpeg-*-static && \
+    mv "${PWD}/ffmpeg" "${PWD}/ffprobe" /usr/local/bin/
 
-# Pull base image.
-FROM jlesage/baseimage-gui:alpine-3.12-v3.5.7
+ENV LANG C.UTF-8
 
-# Docker image version is provided via build arg.
-ARG DOCKER_IMAGE_VERSION=unknown
+# we don't have an interactive xTerm
+ENV DEBIAN_FRONTEND noninteractive
 
-# Define working directory.
-WORKDIR /tmp
+# sets the TimeZone, to be used inside the container
+ENV TZ Asia/Kolkata
 
-# Install MakeMKV.
-COPY --from=makemkv /opt/makemkv /opt/makemkv
+# rclone ,gclone and fclone
+RUN curl https://rclone.org/install.sh | bash && \
+    aria2c https://git.io/gclone.sh && bash gclone.sh && \
+    aria2c https://github.com/mawaya/rclone/releases/download/fclone-v0.4.1/fclone-v0.4.1-linux-amd64.zip && \
+    unzip fclone-v0.4.1-linux-amd64.zip && mv fclone-v0.4.1-linux-amd64/fclone /usr/bin/ && chmod +x /usr/bin/fclone && rm -r fclone-v0.4.1-linux-amd64
 
-# Install Java 8.
-RUN \
-    add-pkg openjdk8-jre-base && \
-    # Removed uneeded stuff.
-    rm -r \
-        /usr/lib/jvm/java-1.8-openjdk/bin \
-        /usr/lib/jvm/java-1.8-openjdk/lib \
-        /usr/lib/jvm/java-1.8-openjdk/jre/lib/ext \
-        && \
-    # Cleanup.
-    rm -rf /tmp/* /tmp/.[!.]*
+#drive downloader
+RUN curl -L https://github.com/jaskaranSM/drivedlgo/releases/download/1.5/drivedlgo_1.5_Linux_x86_64.gz -o drivedl.gz && \
+    7z x drivedl.gz && mv drivedlgo /usr/bin/drivedl && chmod +x /usr/bin/drivedl && rm drivedl.gz
 
-# Install YAD.
-COPY --from=yad /tmp/yad-install/usr/bin/yad /usr/bin/
+#ngrok
+RUN aria2c https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-linux-amd64.zip && unzip ngrok-stable-linux-amd64.zip && mv ngrok /usr/bin/ && chmod +x /usr/bin/ngrok
 
-# Install dependencies.
-RUN \
-    add-pkg \
-        wget \
-        sed \
-        findutils \
-        util-linux \
-        lsscsi
+#install rmega
+RUN gem install rmega
 
-# Adjust the openbox config.
-RUN \
-    # Maximize only the main window.
-    sed-patch 's/<application type="normal">/<application type="normal" title="MakeMKV BETA">/' \
-        /etc/xdg/openbox/rc.xml && \
-    # Make sure the main window is always in the background.
-    sed-patch '/<application type="normal" title="MakeMKV BETA">/a \    <layer>below</layer>' \
-        /etc/xdg/openbox/rc.xml
+# Copies config(if it exists)
+COPY . .
 
-# Generate and install favicons.
-RUN \
-    APP_ICON_URL=https://raw.githubusercontent.com/jlesage/docker-templates/master/jlesage/images/makemkv-icon.png && \
-    install_app_icon.sh "$APP_ICON_URL"
+# Install requirements and start the bot
+RUN npm install
 
-# Add files.
-COPY rootfs/ /
+#install requirements
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Update the default configuration file with the latest beta key.
-RUN /opt/makemkv/bin/makemkv-update-beta-key /defaults/settings.conf
+# setup workdir
+COPY default.conf.template /etc/nginx/conf.d/default.conf.template
+COPY nginx.conf /etc/nginx/nginx.conf
+RUN dpkg --add-architecture i386 && apt-get update && apt-get -y dist-upgrade
 
-# Set environment variables.
-ENV APP_NAME="MakeMKV" \
-    MAKEMKV_KEY="BETA"
-
-# Define mountable directories.
-VOLUME ["/config"]
-VOLUME ["/storage"]
-VOLUME ["/output"]
-
-# Metadata.
-LABEL \
-      org.label-schema.name="makemkv" \
-      org.label-schema.description="Docker container for MakeMKV" \
-      org.label-schema.version="$DOCKER_IMAGE_VERSION" \
-      org.label-schema.vcs-url="https://github.com/jlesage/docker-makemkv" \
-      org.label-schema.schema-version="1.0"
+CMD /bin/bash -c "envsubst '\$PORT' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf" && nginx -g 'daemon on;' &&  qbittorrent-nox -d --webui-port=8080 && cd /usr/src/app && mkdir Downloads && bash start.sh
